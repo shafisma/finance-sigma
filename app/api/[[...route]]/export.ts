@@ -1,34 +1,62 @@
-// app/api/[[...route]]/export.ts
+import { Hono } from 'hono'
+import { db } from '@/db/drizzle'
+import { transactions, accounts, categories } from '@/db/schema'
+import { eq } from 'drizzle-orm'
+import { auth } from '@clerk/nextjs/server'
 
-import { db } from "@/db/drizzle";
-import { transactions } from "@/db/schema";
-import { auth } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
-import { NextResponse } from "next/server";
+const app = new Hono()
 
-export async function GET() {
-  const { userId } = auth();
+app.get('/', async (c) => {
+  const { userId } = auth()
   if (!userId) {
-    return new NextResponse("Unauthorized", { status: 401 });
+    return c.text('Unauthorized', 401)
   }
 
-  const userTransactions = await db
-    .select()
+  try {
+    const userTransactions = await db
+    .select({
+      id: transactions.id,
+      date: transactions.date,
+      amount: transactions.amount,
+      payee: transactions.payee,
+      notes: transactions.notes,
+      account_name: accounts.name,
+      category_name: categories.name
+    })
     .from(transactions)
-    .where(eq(transactions.userId, userId));
+    .leftJoin(accounts, eq(transactions.accountId, accounts.id))
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .where(eq(transactions.accountId, userId))
+    .execute()
 
-  const csv = [
-    "Date,Amount,Category,Payee,Notes",
-    ...userTransactions.map(
-      (t) =>
-        `${t.date},${t.amount},${t.category},${t.payee},${t.notes}`
-    ),
-  ].join("\n");
+    console.log('Fetched transactions:', userTransactions)
 
-  return new NextResponse(csv, {
-    headers: {
-      "Content-Type": "text/csv",
-      "Content-Disposition": `attachment; filename="transactions-${new Date().toISOString()}.csv"`,
-    },
-  });
+    if (userTransactions.length === 0) {
+      return c.text('No transactions found', 404)
+    }
+
+    const csv = generateCSV(userTransactions)
+    
+    c.header('Content-Type', 'text/csv; charset=utf-8')
+    c.header('Content-Disposition', 'attachment; filename=transactions.csv')
+    return c.body(csv)
+  } catch (error) {
+    console.error('Export error:', error)
+    return c.json({ error: 'Failed to export transactions' }, 500)
+  }
+})
+
+function generateCSV(data: { id: string; date: Date; amount: number; payee: string; notes: string | null; account_name: string | null; category_name: string | null }[]) {
+  const headers = ['Date', 'Payee', 'Amount', 'Notes', 'Account', 'Category']
+  const rows = data.map(t => [
+    t.date.toISOString(),
+    t.payee || '',
+    (t.amount / 100).toFixed(2),
+    t.notes || '',
+    t.account_name || '',
+    t.category_name || ''
+  ])
+  return [headers, ...rows].map(row => row.join(',')).join('\n')
 }
+
+export default app

@@ -42,6 +42,23 @@ const TransactionsPage = () => {
     const exportQuery = useExportTransactions();
     const [variant, setVariant] = useState<VARIANTS>(VARIANTS.LIST);
     const [importResults, setImportResults] = useState(INITIAL_IMPORT_RESULTS);
+    const { isOpen, onOpen } = useNewTransaction();
+    const exportMutation = useExportTransactions();
+
+    const exportToCSV = () => {
+        const csvData = transactions.map(transaction => {
+            return `${transaction.date},${transaction.category},${transaction.payee},${transaction.amount},${transaction.account}`;
+        }).join('\n');
+    
+        const blob = new Blob([csvData], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'transactions.csv';
+        a.click();
+        window.URL.revokeObjectURL(url);
+    };
+    
 
     const onUpload = (results: typeof INITIAL_IMPORT_RESULTS) => {
         console.log({ results })
@@ -135,6 +152,12 @@ const TransactionsPage = () => {
                         <UploadButton
                             onUpload={onUpload}
                         />
+                        <Button 
+                            onClick={exportToCSV} 
+                            disabled={exportMutation.isPending}
+                        >
+                            <Download className="mr-2 h-4 w-4" /> Export to CSV
+                        </Button>
                     </div>
                 </CardHeader>
                 <CardContent>
